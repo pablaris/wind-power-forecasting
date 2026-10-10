@@ -6,7 +6,10 @@ from dotenv import load_dotenv
 import pandas as pd
 import requests
 
-load_dotenv()
+script_dir = os.path.dirname(os.path.abspath(__file__))
+env_path = os.path.join(script_dir, "..", "..", ".env")
+load_dotenv(dotenv_path=env_path, encoding="utf-8-sig")
+
 esios_token = os.getenv("ESIOS_TOKEN")
 
 if not esios_token:
@@ -41,11 +44,12 @@ for month in range(0, 36):
 
     for attempt in range(1, max_retries + 1):
         try:
+            # Aumentamos el timeout a 45 segundos
             response = requests.get(
                 url="https://api.esios.ree.es/indicators/10037",
                 headers=headers,
                 params=params,
-                timeout=15,
+                timeout=90,
             )
 
             if response.status_code == 200:
@@ -55,7 +59,7 @@ for month in range(0, 36):
                 break
             else:
                 print(
-                    f"  ⚠️ Attempt {attempt}/{max_retries} failed with status {response.status_code}. Retrying in 2s..."
+                    f"  ⚠️ Attempt {attempt}/{max_retries} failed with status {response.status_code}. Retrying in 3s..."
                 )
         except (
             requests.exceptions.RequestException,
@@ -64,7 +68,7 @@ for month in range(0, 36):
         ) as e:
             print(f"  ⚠️ Attempt {attempt}/{max_retries} failed with error: {e}")
 
-        time.sleep(2)
+        time.sleep(3)
 
     if not success:
         print(
@@ -78,7 +82,6 @@ total_by_province = df.groupby("geo_name")["value"].sum()
 top_8_provinces = total_by_province.sort_values(ascending=False).head(8)
 df = df[df["geo_name"].isin(top_8_provinces.index)]
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
 output_path = os.path.join(
     script_dir, "..", "..", "data", "raw", "esios", "generacion_eolica.csv"
 )
