@@ -10,15 +10,15 @@ load_dotenv()
 esios_token = os.getenv("ESIOS_TOKEN")
 
 df = pd.DataFrame()
-inicio = datetime(2021, 1, 1)
+start_date = datetime(2021, 1, 1)
 
 for month in range(0, 36):
-    print(f"Descargando mes {month + 1}/36...")
-    inicio_del_mes = inicio + relativedelta(months=month)
-    final_del_mes = inicio + relativedelta(months=month + 1)
+    print(f"Downloading month {month + 1}/36...")
+    month_start = start_date + relativedelta(months=month)
+    month_end = start_date + relativedelta(months=month + 1)
 
-    start_str = inicio_del_mes.strftime("%Y-%m-%dT%H:%M:%SZ")
-    end_str = final_del_mes.strftime("%Y-%m-%dT%H:%M:%SZ")
+    start_str = month_start.strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_str = month_end.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     headers = {
         "x-api-key": esios_token,
@@ -52,32 +52,32 @@ for month in range(0, 36):
                 break
             else:
                 print(
-                    f"  ⚠️ Intento {attempt}/{max_retries} falló con status {response.status_code}. Reintentando en 2s..."
+                    f"  ⚠️ Attempt {attempt}/{max_retries} failed with status {response.status_code}. Retrying in 2s..."
                 )
         except (
             requests.exceptions.RequestException,
             requests.exceptions.JSONDecodeError,
             KeyError,
         ) as e:
-            print(f"  ⚠️ Intento {attempt}/{max_retries} con error: {e}")
+            print(f"  ⚠️ Attempt {attempt}/{max_retries} failed with error: {e}")
 
         time.sleep(2)
 
     if not success:
         print(
-            f"❌ No se pudo descargar el mes {month + 1} tras {max_retries} intentos."
+            f"❌ Failed to download month {month + 1} after {max_retries} attempts."
         )
 
     time.sleep(1)
 
 df = df.drop(columns=["datetime_utc", "tz_time"])
-total_por_provincia = df.groupby("geo_name")["value"].sum()
-top_8 = total_por_provincia.sort_values(ascending=False).head(8)
-df = df[df["geo_name"].isin(top_8.index)]
+total_by_province = df.groupby("geo_name")["value"].sum()
+top_8_provinces = total_by_province.sort_values(ascending=False).head(8)
+df = df[df["geo_name"].isin(top_8_provinces.index)]
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 output_path = os.path.join(
     script_dir, "..", "..", "data", "raw", "esios", "generacion_eolica.csv"
 )
 df.to_csv(output_path, index=False)
-print("✅ Downoload was completed and donwloaded succesuflly.")
+print("✅ Download completed and saved successfully.")
