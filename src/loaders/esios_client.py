@@ -9,27 +9,30 @@ import requests
 load_dotenv()
 esios_token = os.getenv("ESIOS_TOKEN")
 
+if not esios_token:
+    raise ValueError(
+        "❌ ESIOS_TOKEN is missing or not loaded correctly from .env file."
+    )
+
+esios_token = esios_token.strip("'\" ")
+
 df = pd.DataFrame()
 start_date = datetime(2021, 1, 1)
+
+headers = {
+    "x-api-key": esios_token,
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+}
 
 for month in range(0, 36):
     print(f"Downloading month {month + 1}/36...")
     month_start = start_date + relativedelta(months=month)
     month_end = start_date + relativedelta(months=month + 1)
 
-    start_str = month_start.strftime("%Y-%m-%dT%H:%M:%SZ")
-    end_str = month_end.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    headers = {
-        "x-api-key": esios_token,
-        "Accept": "application/json; application/xls",
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-    }
-
     params = {
-        "start_date": start_str,
-        "end_date": end_str,
+        "start_date": month_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "end_date": month_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "time_trunc": "hour",
     }
 
