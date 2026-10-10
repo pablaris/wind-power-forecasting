@@ -9,10 +9,10 @@ load_dotenv()
 esios_token = os.getenv("ESIOS_TOKEN")
 
 df = pd.DataFrame()
-inicio = datetime(2023, 1, 1)
+inicio = datetime(2021, 1, 1)
 
-for month in range(0, 12):
-  print(f"Descargando mes {month +1}/12")
+for month in range(0, 36):
+  print(f"Descargando mes {month +1}/36")
   inicio_del_mes = inicio + relativedelta(months = month)
   final_del_mes = inicio + relativedelta(months = month +1)
 
@@ -31,6 +31,14 @@ for month in range(0, 12):
   }
   )
   monthly_data = response.json()["indicator"]["values"]
+  if response.status_code != 200:
+    print(f"Error mes{month+1}: status {response.status_code}")
+    continue
+  try:
+    monthly_data = response.json()["indicator"]["values"]
+  except (requests.exceptions.JSONDecodeError, KeyError) as e:
+    print(f"Error parseando mes {month +1}: {e}")
+    continue
   df = pd.concat([df, pd.DataFrame(monthly_data)])
   
 
