@@ -39,7 +39,7 @@ for provincia, coords in PROVINCIAS.items():
       "end_date": END_DATE, 
       "hourly": ",".join(VARIABLES), 
       "wind_speed_unit": "ms", 
-      "timezone": "Europe/Madrid"
+      "timezone": "UTC"
     },
   )
   data = response.json()

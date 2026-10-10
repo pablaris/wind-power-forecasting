@@ -1,89 +1,71 @@
-from datetime import datetime
 import os
 import time
-from dateutil.relativedelta import relativedelta
-from dotenv import load_dotenv
+from datetime import datetime
+
 import pandas as pd
 import requests
+from dateutil.relativedelta import relativedelta
+from dotenv import load_dotenv
+
+URL = "https://api.esios.ree.es/indicators/10037"
+START_DATE = datetime(2021, 1, 1)
+N_MONTHS = 36
+MAX_RETRIES = 3
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-env_path = os.path.join(script_dir, "..", "..", ".env")
-load_dotenv(dotenv_path=env_path, encoding="utf-8-sig")
+load_dotenv(os.path.join(script_dir, "..", "..", ".env"), encoding="utf-8-sig")
 
-esios_token = os.getenv("ESIOS_TOKEN")
+token = os.getenv("ESIOS_TOKEN")
+if not token:
+    raise ValueError("ESIOS_TOKEN not found in .env")
 
-if not esios_token:
-    raise ValueError(
-        "❌ ESIOS_TOKEN is missing or not loaded correctly from .env file."
-    )
+headers = {"x-api-key": token.strip(), "Accept": "application/json"}
 
-esios_token = esios_token.strip("'\" ")
 
-df = pd.DataFrame()
-start_date = datetime(2021, 1, 1)
-
-headers = {
-    "x-api-key": esios_token,
-    "Accept": "application/json",
-    "Content-Type": "application/json",
-}
-
-for month in range(0, 36):
-    print(f"Downloading month {month + 1}/36...")
-    month_start = start_date + relativedelta(months=month)
-    month_end = start_date + relativedelta(months=month + 1)
-
+def download_month(start, end):
     params = {
-        "start_date": month_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "end_date": month_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "start_date": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "end_date": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "time_trunc": "hour",
     }
-
-    max_retries = 3
-    success = False
-
-    for attempt in range(1, max_retries + 1):
+    for attempt in range(MAX_RETRIES):
         try:
-            # Aumentamos el timeout a 45 segundos
-            response = requests.get(
-                url="https://api.esios.ree.es/indicators/10037",
-                headers=headers,
-                params=params,
-                timeout=90,
-            )
+            response = requests.get(URL, headers=headers, params=params, timeout=90)
+            response.raise_for_status()
+            return pd.DataFrame(response.json()["indicator"]["values"])
+        except (requests.RequestException, KeyError) as e:
+            print(f"  attempt {attempt + 1} failed: {e}")
+            time.sleep(3)
+    return None
 
-            if response.status_code == 200:
-                monthly_data = response.json()["indicator"]["values"]
-                df = pd.concat([df, pd.DataFrame(monthly_data)])
-                success = True
-                break
-            else:
-                print(
-                    f"  ⚠️ Attempt {attempt}/{max_retries} failed with status {response.status_code}. Retrying in 3s..."
-                )
-        except (
-            requests.exceptions.RequestException,
-            requests.exceptions.JSONDecodeError,
-            KeyError,
-        ) as e:
-            print(f"  ⚠️ Attempt {attempt}/{max_retries} failed with error: {e}")
 
-        time.sleep(3)
+monthly_dfs = []
+failed_months = []
 
-    if not success:
-        print(
-            f"❌ Failed to download month {month + 1} after {max_retries} attempts."
-        )
+for i in range(N_MONTHS):
+    start = START_DATE + relativedelta(months=i)
+    end = start + relativedelta(months=1)
+    print(f"Downloading {start:%Y-%m} ({i + 1}/{N_MONTHS})")
 
+    month_df = download_month(start, end)
+    if month_df is None:
+        failed_months.append(f"{start:%Y-%m}")
+    else:
+        monthly_dfs.append(month_df)
     time.sleep(1)
 
-df = df.drop(columns=["datetime_utc", "tz_time"])
-total_by_province = df.groupby("geo_name")["value"].sum()
-top_8_provinces = total_by_province.sort_values(ascending=False).head(8)
-df = df[df["geo_name"].isin(top_8_provinces.index)]
+if failed_months:
+    raise RuntimeError(f"Could not download: {', '.join(failed_months)}. Nothing saved.")
 
-output_path = os.path.join(
-    script_dir, "..", "..", "data", "raw", "esios", "generacion_eolica.csv"
-)
+df = pd.concat(monthly_dfs, ignore_index=True)
+df = df.drop_duplicates(subset = ["datetime", "geo_name"])
+df = df.drop(columns=["datetime_utc", "tz_time"])
+
+# Keep the 8 provinces with the highest total generation
+top_8 = df.groupby("geo_name")["value"].sum().nlargest(8).index
+df = df[df["geo_name"].isin(top_8)]
+
+output_path = os.path.join(script_dir, "..", "..", "data", "raw", "esios", "generacion_eolica.csv")
+os.makedirs(os.path.dirname(output_path), exist_ok=True)
 df.to_csv(output_path, index=False)
-print("✅ Download completed and saved successfully.")
+print(f"Saved {len(df)} rows to {output_path}")

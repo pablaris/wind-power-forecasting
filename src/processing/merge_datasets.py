@@ -8,8 +8,8 @@ meteo_path = os.path.join(script_dir, "..", "..", "data", "raw", "open_meteo", "
 df_esios = pd.read_csv(esios_path)
 df_meteo = pd.read_csv(meteo_path)
 
-df_esios["datetime"] = pd.to_datetime(df_esios["datetime"], utc = True).dt.tz_convert("Europe/Madrid")
-df_meteo["datetime"] = pd.to_datetime(df_meteo["time"]).dt.tz_localize("Europe/Madrid", nonexistent="shift_forward", ambiguous="NaT")
+df_esios["datetime"] = pd.to_datetime(df_esios["datetime"], utc = True)
+df_meteo["datetime"] = pd.to_datetime(df_meteo["time"], utc = True)
 df_esios = df_esios.rename(columns = {"geo_name": "provincia", "value": "generacion_mw"})
 df_esios = df_esios.drop(columns = ["geo_id"])
 df_meteo = df_meteo.drop(columns = ["time"])
@@ -22,4 +22,4 @@ df.to_csv(output_path, index = False)
 
 print(f"Dataset merged: {df.shape}")
 print(f"Provinces: {df["provincia"].unique()}")
-print(f"Range: from {df["datetime"].min()} to {df['datetime'].max()} ")
+print(f"Range: from {df["datetime"].min()} to {df['datetime'].max()}")
