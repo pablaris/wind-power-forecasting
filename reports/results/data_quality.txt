@@ -1,0 +1,9 @@
+Rows: 210119  |  expected per province: 26280
+A Coruña   missing_hours=    4 duplicates=   0 negative_gen=   0 NaN_values=   0
+Albacete   missing_hours=    4 duplicates=   0 negative_gen=   0 NaN_values=   0
+Burgos     missing_hours=    7 duplicates=   0 negative_gen=   0 NaN_values=   0
+Cádiz      missing_hours=    8 duplicates=   0 negative_gen=   0 NaN_values=   0
+Lugo       missing_hours=   17 duplicates=   0 negative_gen=   0 NaN_values=   0
+Navarra    missing_hours=   42 duplicates=   0 negative_gen=   0 NaN_values=   0
+Soria      missing_hours=   23 duplicates=   0 negative_gen=   0 NaN_values=   0
+Zaragoza   missing_hours=   16 duplicates=   0 negative_gen=   0 NaN_values=   0

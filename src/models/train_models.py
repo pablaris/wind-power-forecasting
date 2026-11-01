@@ -113,7 +113,7 @@ def add_features(df):
 
     # Calendar (cyclical encoding)
     hour = df["datetime"].dt.hour
-    doy = df["datetime"].dt.dayofyear
+    doy = df["datetime"].dt.day_of_year
     df["hour_sin"], df["hour_cos"] = np.sin(2*np.pi*hour/24), np.cos(2*np.pi*hour/24)
     df["doy_sin"], df["doy_cos"] = np.sin(2*np.pi*doy/365.25), np.cos(2*np.pi*doy/365.25)
     df["month"] = df["datetime"].dt.month
