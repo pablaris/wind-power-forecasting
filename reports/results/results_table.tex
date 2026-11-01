@@ -1,0 +1,12 @@
+\begin{tabular}{lrrrrrr}
+\toprule
+Model & RMSE & MAE & nRMSE & Skill & RMSE$_{\Sigma 8}$ & Fit time \\
+ & (MW) & (MW) & (\%) & (\%) & (MW) & (s) \\
+\midrule
+Persistence (t-24h) & 486.2 & 316.0 & 26.2 & 0.0 & 1976 & 0 \\
+Climatology & 494.1 & 364.1 & 25.9 & -1.6 & 2173 & 0 \\
+Ridge & 272.7 & 194.8 & 15.6 & 43.9 & 933 & 4 \\
+Lasso & 272.4 & 194.7 & 15.6 & 44.0 & 931 & 6 \\
+XGBoost & 223.4 & 151.6 & 12.2 & 54.1 & 797 & 108 \\
+\bottomrule
+\end{tabular}
