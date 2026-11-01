@@ -1,0 +1,12 @@
+\begin{tabular}{lrrrrrr}
+\toprule
+Model & RMSE [95\% CI] & nRMSE & Skill & RMSE$_{\Sigma}$ & Tune & Fit \\
+ & (MW) & (\%) & (\%) & (MW) & (s) & (s) \\
+\midrule
+Persistence & 463.3 [444, 484] & 24.6 & 0.0 & 2102 & 0 & 0.0 \\
+Climatology & 449.3 [434, 464] & 23.2 & 3.0 & 2271 & 0 & 0.0 \\
+Ridge & 260.8 [254, 268] & 14.7 & 43.7 & 1099 & 1 & 0.1 \\
+Lasso & 260.9 [254, 268] & 14.7 & 43.7 & 1099 & 6 & 0.4 \\
+XGBoost & 219.2 [212, 226] & 12.0 & 52.7 & 974 & 60 & 7.3 \\
+\bottomrule
+\end{tabular}
