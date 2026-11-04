@@ -1,21 +1,20 @@
 """
-Diagnose province coverage and missing hours in the raw and merged datasets.
-Read-only: it never modifies any file.
+Read-only diagnosis of province coverage and missing hours.
 
 Run from the project root:
-    python src/processing/check_dataset.py
+    python src/processing/check_dataset.py --weather forecast
 """
+import argparse
 import os
+import sys
 
 import pandas as pd
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-root = os.path.abspath(os.path.join(script_dir, "..", ".."))
-ESIOS = os.path.join(root, "data", "raw", "esios", "generacion_eolica.csv")
-METEO = os.path.join(root, "data", "raw", "open_meteo", "meteorology.csv")
-MERGED = os.path.join(root, "data", "processed", "dataset.csv")
+sys.path.insert(0, os.path.join(script_dir, ".."))
+import config  # noqa: E402
 
-FULL_RANGE = pd.date_range("2021-01-01 00:00", "2023-12-31 23:00", freq="h", tz="UTC")
+ROOT = os.path.join(script_dir, "..", "..")
 
 
 def load(path, time_col, prov_col):
@@ -25,8 +24,7 @@ def load(path, time_col, prov_col):
 
 
 def missing_ranges(times):
-    """Group the missing hours of one province into consecutive blocks."""
-    missing = FULL_RANGE.difference(pd.DatetimeIndex(times.unique()))
+    missing = config.FULL_RANGE.difference(pd.DatetimeIndex(times.unique()))
     if len(missing) == 0:
         return []
     s = pd.Series(missing)
@@ -35,36 +33,44 @@ def missing_ranges(times):
 
 
 def coverage_report(name, df):
-    print(f"\n=== {name}: hours per province (expected {len(FULL_RANGE)}) ===")
+    print(f"\n=== {name}: hours per province (expected {len(config.FULL_RANGE)}) ===")
     for prov, g in df.groupby("provincia"):
         blocks = missing_ranges(g["datetime"])
         n_missing = sum(b[2] for b in blocks)
-        print(f"{prov:12s} hours={g['datetime'].nunique():6d} missing={n_missing:5d}")
-        big = [b for b in blocks if b[2] >= 24]           # gaps of a day or more
+        print(f"{prov:12s} hours={g['datetime'].isin(config.FULL_RANGE).sum():6d} "
+              f"missing={n_missing:5d}")
+        big = [b for b in blocks if b[2] >= 24]
         for start, end, n in big[:5]:
             print(f"{'':12s}   gap {start:%Y-%m-%d %H:%M} -> {end:%Y-%m-%d %H:%M} ({n} h)")
-        small = len(blocks) - len(big)
-        if small:
-            print(f"{'':12s}   + {small} short gap(s) < 24 h")
+        if len(blocks) - len(big):
+            print(f"{'':12s}   + {len(blocks) - len(big)} short gap(s) < 24 h")
 
 
 def main():
-    esios = load(ESIOS, "datetime", "geo_name")
-    meteo = load(METEO, "time", "provincia")
-    merged = load(MERGED, "datetime", "provincia")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--weather", choices=["forecast", "reanalysis"], default="forecast")
+    w = parser.parse_args().weather
 
-    # 1. Province names in each source
+    esios = load(os.path.join(ROOT, "data", "raw", "esios", "generacion_eolica.csv"),
+                 "datetime", "geo_name")
+    meteo = load(os.path.join(ROOT, "data", "raw", "open_meteo", f"meteorology_{w}.csv"),
+                 "time", "provincia")
+    merged = load(os.path.join(ROOT, "data", "processed", f"dataset_{w}.csv"),
+                  "datetime", "provincia")
+
     e, m = set(esios["provincia"]), set(meteo["provincia"])
+    print(f"Study period: {config.START} to {config.END} | weather: {w}")
     print("=== Provinces ===")
     print("ESIOS      :", sorted(e))
     print("Open-Meteo :", sorted(m))
     print("Merged     :", sorted(set(merged["provincia"])))
-    print("In ESIOS but not in Open-Meteo (dropped by the merge):", sorted(e - m) or "none")
-    print("In Open-Meteo but not in ESIOS (dropped by the merge):", sorted(m - e) or "none")
+    print("In ESIOS but not in Open-Meteo:", sorted(e - m) or "none")
+    print("In Open-Meteo but not in ESIOS:", sorted(m - e) or "none")
+    print("\nMissing weather values (share):")
+    print(meteo[config.WEATHER_VARS].isna().mean().map("{:.1%}".format).to_string())
 
-    # 2. Missing hours, source by source, to see WHERE the gap comes from
     coverage_report("ESIOS (raw)", esios)
-    coverage_report("Open-Meteo (raw)", meteo)
+    coverage_report(f"Open-Meteo {w} (raw)", meteo)
     coverage_report("Merged dataset", merged)
 
 
