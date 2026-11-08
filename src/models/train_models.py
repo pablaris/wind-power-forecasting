@@ -19,6 +19,7 @@ Outputs: reports/results/<weather>/ and reports/figures/<weather>/
 """
 import argparse
 import os
+import re
 import sys
 import time
 
@@ -50,18 +51,33 @@ N_BOOT = 1000
 SEED = 42
 
 HISTORY = ["gen_lag24", "gen_lag48", "gen_lag168", "gen_roll24_mean"]
-CALENDAR = ["hour_sin", "hour_cos", "doy_sin", "doy_cos"]
+HOUR = ["hour_sin", "hour_cos"]
+# Meteorological seasons. --calendar picks how the time of YEAR is encoded;
+# the hour-of-day features are the same in every case.
+SEASONS = {"winter": [12, 1, 2], "spring": [3, 4, 5],
+           "summer": [6, 7, 8], "autumn": [9, 10, 11]}
+SEASONAL = {
+    "doy": ["doy_sin", "doy_cos"],                       # default (original behaviour)
+    "month": ["month_sin", "month_cos"],
+    "season": [f"season_{s}" for s in SEASONS],
+    "none": [],                                          # control: hour of day only
+}
 WEATHER = ["wind_speed_100m", "wind_gusts_10m", "temperature_2m", "pressure_msl",
            "wdir_sin", "wdir_cos"]
 PHYSICS = ["ws2", "ws3_capped", "in_operating_range", "dp_3h", "ws_change_3h"]
 
-# Progressively richer inputs (province indicators are added to every set)
-FEATURE_SETS = {
-    "S1 History": HISTORY,
-    "S2 +Calendar": HISTORY + CALENDAR,
-    "S3 +Weather": HISTORY + CALENDAR + WEATHER,
-    "S4 +Physics": HISTORY + CALENDAR + WEATHER + PHYSICS,
-}
+
+def make_feature_sets(calendar="doy"):
+    """Progressively richer inputs (province indicators are added to every set)."""
+    cal = HOUR + SEASONAL[calendar]
+    return {
+        "S1 History": HISTORY,
+        "S2 +Calendar": HISTORY + cal,
+        "S3 +Weather": HISTORY + cal + WEATHER,
+        "S4 +Physics": HISTORY + cal + WEATHER + PHYSICS,
+    }
+
+
 FULL_SET = "S4 +Physics"
 
 
@@ -109,6 +125,10 @@ def add_features(df, weather_vars):
     df["hour_sin"], df["hour_cos"] = np.sin(2*np.pi*hour/24), np.cos(2*np.pi*hour/24)
     df["doy_sin"], df["doy_cos"] = np.sin(2*np.pi*doy/365.25), np.cos(2*np.pi*doy/365.25)
     df["month"], df["hour"] = df["datetime"].dt.month, hour
+    # Coarser alternatives to day-of-year (only used if selected with --calendar)
+    df["month_sin"], df["month_cos"] = np.sin(2*np.pi*df["month"]/12), np.cos(2*np.pi*df["month"]/12)
+    for name, months in SEASONS.items():
+        df[f"season_{name}"] = df["month"].isin(months).astype(int)
 
     dummies = pd.get_dummies(df["provincia"], prefix="prov", dtype=int)
     return pd.concat([df, dummies], axis=1), list(dummies.columns)
@@ -163,11 +183,23 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--weather", choices=["forecast", "reanalysis"], default="forecast")
     parser.add_argument("--quick", action="store_true")
+    parser.add_argument("--calendar", choices=list(SEASONAL), default="doy",
+                        help="how the time of year is encoded (hour of day is unchanged)")
+    parser.add_argument("--tag", default=None,
+                        help="write to reports/{results,figures}/<tag> instead of "
+                             "the default <weather> folders")
     args = parser.parse_args()
+    if args.tag is not None and (not re.fullmatch(r"[A-Za-z0-9_-]+", args.tag)
+                                 or args.tag in ("forecast", "reanalysis")):
+        parser.error("--tag must be letters/digits/-/_ and cannot be 'forecast' or "
+                     "'reanalysis' (those folders hold the team's tracked results)")
+    if args.calendar != "doy":
+        print(f"Calendar encoding of the time of year: {args.calendar}")
 
     root = os.path.abspath(os.path.join(script_dir, "..", ".."))
-    res_dir = os.path.join(root, "reports", "results", args.weather)
-    fig_dir = os.path.join(root, "reports", "figures", args.weather)
+    out_name = args.tag or args.weather
+    res_dir = os.path.join(root, "reports", "results", out_name)
+    fig_dir = os.path.join(root, "reports", "figures", out_name)
     os.makedirs(res_dir, exist_ok=True)
     os.makedirs(fig_dir, exist_ok=True)
 
@@ -182,7 +214,7 @@ def main():
     unusable = {"wind_gusts_10m": ["wind_gusts_10m"], "temperature_2m": ["temperature_2m"],
                 "pressure_msl": ["pressure_msl", "dp_3h"]}
     skip = [c for v in dropped for c in unusable.get(v, [])]
-    sets = {k: [f for f in v if f not in skip] + prov_cols for k, v in FEATURE_SETS.items()}
+    sets = {k: [f for f in v if f not in skip] + prov_cols for k, v in make_feature_sets(args.calendar).items()}
 
     all_feats = sorted(set().union(*sets.values()))
     df = df.dropna(subset=all_feats + ["generacion_mw"]).sort_values("datetime")
