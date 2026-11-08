@@ -1,0 +1,17 @@
+tag,calendar,set,model,RMSE_MW,CI_low,CI_high
+cal_doy,doy,S1 History,XGBoost,405.45,392.06,420.15
+cal_doy,doy,S1 History,Ridge,400.43,387.86,415.22
+cal_doy,doy,S2 +Calendar,XGBoost,421.06,405.11,436.87
+cal_doy,doy,S2 +Calendar,Ridge,395.9,383.38,409.82
+cal_month,month,S1 History,XGBoost,405.45,392.06,420.15
+cal_month,month,S1 History,Ridge,400.43,387.86,415.22
+cal_month,month,S2 +Calendar,XGBoost,407.76,393.57,422.22
+cal_month,month,S2 +Calendar,Ridge,395.91,383.38,409.94
+cal_season,season,S1 History,XGBoost,405.45,392.06,420.15
+cal_season,season,S1 History,Ridge,400.43,387.86,415.22
+cal_season,season,S2 +Calendar,XGBoost,403.6,389.64,418.63
+cal_season,season,S2 +Calendar,Ridge,397.68,385.19,411.89
+cal_none,none,S1 History,XGBoost,405.45,392.06,420.15
+cal_none,none,S1 History,Ridge,400.43,387.86,415.22
+cal_none,none,S2 +Calendar,XGBoost,403.83,390.69,418.45
+cal_none,none,S2 +Calendar,Ridge,399.32,386.64,414.07
