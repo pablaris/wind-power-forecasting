@@ -14,6 +14,10 @@ Run from the project root (after merge_datasets.py):
     python src/models/train_models.py --weather forecast      # main, no leakage
     python src/models/train_models.py --weather reanalysis    # upper bound
 Add --quick for a fast test run with smaller hyper-parameter grids.
+Add --lstm to also train the LSTM (needs PyTorch); --lstm-sets full trains it
+only on the full input set S4, which is much faster.
+Add --device cuda to run XGBoost and the LSTM on an NVIDIA GPU (Ridge and Lasso
+always run on the CPU).
 
 Outputs: reports/results/<weather>/ and reports/figures/<weather>/
 """
@@ -22,6 +26,13 @@ import os
 import re
 import sys
 import time
+
+# CPU threads per model: all cores by default. On one of our laptops, all cores made
+# XGBoost several times SLOWER (thread contention); if that happens, limit it for a
+# run with:  N_THREADS=2 python src/models/train_models.py ...
+N_THREADS = int(os.environ.get("N_THREADS", str(os.cpu_count() or 1)))
+for _var in ["OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"]:
+    os.environ[_var] = str(N_THREADS)       # must be set before numpy is imported
 
 import matplotlib
 matplotlib.use("Agg")
@@ -135,7 +146,7 @@ def add_features(df, weather_vars):
 
 
 # ------------------------------------------------------------------ models
-def make_models(quick):
+def make_models(quick, device="cpu"):
     models = {
         "Ridge": (make_pipeline(StandardScaler(), Ridge()),
                   {"ridge__alpha": np.logspace(-3, 3, 7 if quick else 13)}),
@@ -146,7 +157,7 @@ def make_models(quick):
         models["XGBoost"] = (
             XGBRegressor(n_estimators=150 if quick else 600, learning_rate=0.05,
                          subsample=0.8, colsample_bytree=0.8, random_state=SEED,
-                         n_jobs=-1, tree_method="hist"),
+                         n_jobs=N_THREADS, tree_method="hist", device=device),
             {"max_depth": [6] if quick else [4, 6, 8],
              "min_child_weight": [10] if quick else [1, 10]})
     else:
@@ -178,11 +189,27 @@ def bootstrap(test, cols, n_boot=N_BOOT):
     return out
 
 
+def check_gpu():
+    """Stop with a clear message if XGBoost cannot use the GPU."""
+    if not HAS_XGB:
+        sys.exit("--device cuda needs xgboost installed.")
+    try:
+        XGBRegressor(n_estimators=2, device="cuda", tree_method="hist").fit(
+            np.random.rand(50, 3), np.random.rand(50))
+    except Exception as e:  # noqa: BLE001
+        sys.exit(f"XGBoost cannot use the GPU: {e}\nCheck that 'nvidia-smi' works.")
+
+
 # -------------------------------------------------------------------- main
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--weather", choices=["forecast", "reanalysis"], default="forecast")
     parser.add_argument("--quick", action="store_true")
+    parser.add_argument("--lstm", action="store_true", help="also train the LSTM")
+    parser.add_argument("--lstm-sets", choices=["all", "full"], default="all",
+                        help="input sets for the LSTM: all four, or only S4")
+    parser.add_argument("--device", choices=["cpu", "cuda"], default="cpu",
+                        help="cuda = run XGBoost and the LSTM on an NVIDIA GPU")
     parser.add_argument("--calendar", choices=list(SEASONAL), default="doy",
                         help="how the time of year is encoded (hour of day is unchanged)")
     parser.add_argument("--tag", default=None,
@@ -195,6 +222,13 @@ def main():
                      "'reanalysis' (those folders hold the team's tracked results)")
     if args.calendar != "doy":
         print(f"Calendar encoding of the time of year: {args.calendar}")
+    if args.device == "cuda":
+        check_gpu()
+    if args.lstm:
+        import lstm_model
+        if not lstm_model.HAS_TORCH:
+            sys.exit("PyTorch is not installed. Run: pip install torch "
+                     "--index-url https://download.pytorch.org/whl/cpu")
 
     root = os.path.abspath(os.path.join(script_dir, "..", ".."))
     out_name = args.tag or args.weather
@@ -203,6 +237,7 @@ def main():
     os.makedirs(res_dir, exist_ok=True)
     os.makedirs(fig_dir, exist_ok=True)
 
+    print(f"Using {N_THREADS} CPU threads per model | device for XGBoost/LSTM: {args.device}")
     df = load(os.path.join(root, "data", "processed", f"dataset_{args.weather}.csv"))
 
     # Drop weather variables that did not come back from the API
@@ -217,6 +252,7 @@ def main():
     sets = {k: [f for f in v if f not in skip] + prov_cols for k, v in make_feature_sets(args.calendar).items()}
 
     all_feats = sorted(set().union(*sets.values()))
+    hourly = df.copy()                 # complete hourly grid, used for LSTM sequences
     df = df.dropna(subset=all_feats + ["generacion_mw"]).sort_values("datetime")
     test_start = pd.Timestamp(config.TEST_START, tz="UTC")
     train = df[df["datetime"] < test_start].copy()
@@ -227,7 +263,21 @@ def main():
 
     # Normalise by each province's training maximum (capacity proxy)
     cap = train.groupby("provincia")["generacion_mw"].max()
-    for d in (train, test):
+
+    # The LSTM needs the previous hours to be complete. For a fair comparison, ALL
+    # models are evaluated on the same test hours, so hours without a complete
+    # window are removed from the test set (and from the LSTM's training data).
+    train_lstm = None
+    if args.lstm:
+        is_train = lambda t: t < test_start  # noqa: E731
+        arr_all, lookup_all = lstm_model.build_grid(hourly, all_feats, cap, is_train)
+        ok_te = lstm_model.valid_windows(arr_all, lstm_model.row_index(test, lookup_all))
+        ok_tr = lstm_model.valid_windows(arr_all, lstm_model.row_index(train, lookup_all))
+        print(f"LSTM windows ({lstm_model.SEQ_LEN} h): dropping {(~ok_te).sum()} test rows "
+              f"and {(~ok_tr).sum()} training rows without complete history")
+        test = test[ok_te].copy()
+        train_lstm = train[ok_tr].copy()
+    for d in [x for x in (train, test, train_lstm) if x is not None]:
         c = d["provincia"].map(cap)
         d["y_norm"] = d["generacion_mw"] / c
         for col in HISTORY:
@@ -243,16 +293,17 @@ def main():
         test[["provincia", "month", "hour"]])).values, 0, 1) * c_te
     for b in ["Persistence", "Climatology"]:
         pred_cols.append(b)
-        info[b] = {"Set": "-", "Model": b, "Tune_s": 0.0, "Fit_s": 0.0, "Pred_ms_per_1k": 0.0}
+        info[b] = {"Set": "-", "Model": b, "Device": "-", "Tune_s": 0.0, "Fit_s": 0.0,
+                   "Pred_ms_per_1k": 0.0}
 
     # --- Every model on every feature set
     importances = {}
     for set_name, feats in sets.items():
-        for model_name, (est, grid) in make_models(args.quick).items():
+        for model_name, (est, grid) in make_models(args.quick, args.device).items():
             col = f"{model_name} | {set_name}"
             print(f"Training {col} ({len(feats)} features)...", flush=True)
             gs = GridSearchCV(est, grid, cv=tscv, scoring="neg_root_mean_squared_error",
-                              n_jobs=1 if model_name == "XGBoost" else -1)
+                              n_jobs=1 if model_name == "XGBoost" else N_THREADS)
             t0 = time.perf_counter()
             gs.fit(train[feats], train["y_norm"])
             tune = time.perf_counter() - t0
@@ -261,7 +312,8 @@ def main():
             pred_ms = 1000 * (time.perf_counter() - t0) / len(test) * 1000
             test[col] = np.clip(p, 0, 1) * c_te
             pred_cols.append(col)
-            info[col] = {"Set": set_name, "Model": model_name, "Tune_s": tune,
+            dev = args.device if model_name == "XGBoost" else "cpu"
+            info[col] = {"Set": set_name, "Model": model_name, "Device": dev, "Tune_s": tune,
                          "Fit_s": gs.refit_time_, "Pred_ms_per_1k": pred_ms,
                          "CV_nRMSE_%": -100 * gs.best_score_, "Best_params": gs.best_params_}
             if set_name == FULL_SET:
@@ -270,6 +322,20 @@ def main():
                     importances["xgb_gain"] = pd.Series(best.feature_importances_, index=feats)
                 if model_name == "Lasso":
                     importances["lasso_coef"] = pd.Series(best[-1].coef_, index=feats)
+
+    # --- LSTM last: PyTorch is only loaded now, so it never competes with XGBoost
+    for set_name, feats in sets.items():
+        if args.lstm and (args.lstm_sets == "all" or set_name == FULL_SET):
+            col = f"LSTM | {set_name}"
+            print(f"Training {col} ({len(feats)} features)...", flush=True)
+            arr, lookup = lstm_model.build_grid(hourly, feats, cap, is_train)
+            p, inf = lstm_model.tune_fit_predict(
+                arr, lstm_model.row_index(train_lstm, lookup), train_lstm["y_norm"].values,
+                train_lstm["datetime"], lstm_model.row_index(test, lookup), quick=args.quick,
+                device=args.device)
+            test[col] = np.clip(p, 0, 1) * c_te
+            pred_cols.append(col)
+            info[col] = {"Set": set_name, "Model": "LSTM", "Device": args.device, **inf}
 
     # --- Evaluation
     boot = bootstrap(test, pred_cols)
@@ -297,12 +363,25 @@ def main():
     gaps = pd.DataFrame(gaps)
     gaps.to_csv(os.path.join(res_dir, "xgb_vs_ridge_gap.csv"), index=False)
 
+    lstm_gaps = []
+    for set_name in sets:
+        if f"LSTM | {set_name}" in pred_cols:
+            i_l = pred_cols.index(f"LSTM | {set_name}")
+            i_x = pred_cols.index(f"XGBoost | {set_name}")
+            d = boot[:, i_l] - boot[:, i_x]
+            lstm_gaps.append({"Set": set_name, "LSTM_minus_XGB_MW": d.mean(),
+                              "CI_low": np.percentile(d, 2.5),
+                              "CI_high": np.percentile(d, 97.5)})
+    lstm_gaps = pd.DataFrame(lstm_gaps)
+    if len(lstm_gaps):
+        lstm_gaps.to_csv(os.path.join(res_dir, "lstm_vs_xgb_gap.csv"), index=False)
+
     # Per province (full feature set)
     prov_rows = []
     for prov, g in test.groupby("provincia"):
         p_rmse = metrics(g["generacion_mw"], g["Persistence"])["RMSE"]
-        for col in ["Persistence", "Climatology"] + [f"{m} | {FULL_SET}"
-                                                      for m in ["Ridge", "Lasso", "XGBoost"]]:
+        for col in ["Persistence", "Climatology"] + [c for c in pred_cols
+                                                      if c.endswith(f"| {FULL_SET}")]:
             r = metrics(g["generacion_mw"], g[col])
             prov_rows.append({"Province": prov, "Model": col.split(" | ")[0], **r,
                               "Skill_%": 100 * (1 - r["RMSE"] / p_rmse)})
@@ -314,12 +393,15 @@ def main():
 
     # --- Console summary
     pd.set_option("display.width", 160)
-    show = res[["Set", "Model", "RMSE", "RMSE_CI_low", "RMSE_CI_high", "nRMSE_%",
+    show = res[["Set", "Model", "Device", "RMSE", "RMSE_CI_low", "RMSE_CI_high", "nRMSE_%",
                 "Skill_%", "RMSE_sum", "Tune_s", "Fit_s", "Pred_ms_per_1k"]]
     print(f"\n=== Test results ({args.weather} weather) ===")
     print(show.round(2).to_string(index=False))
     print("\n=== Ridge RMSE minus XGBoost RMSE (MW, 95% CI): positive = XGBoost better ===")
     print(gaps.round(1).to_string(index=False))
+    if len(lstm_gaps):
+        print("\n=== LSTM RMSE minus XGBoost RMSE (MW, 95% CI): negative = LSTM better ===")
+        print(lstm_gaps.round(1).to_string(index=False))
 
     # --- LaTeX tables
     def fmt_ci(r):
@@ -337,12 +419,16 @@ def main():
         f.write("\n".join(lines))
 
     piv = res[res["Set"] != "-"].pivot(index="Set", columns="Model", values="RMSE")
-    lines = [r"\begin{tabular}{lrrrr}", r"\toprule",
-             r"Inputs & Ridge & Lasso & XGBoost & Ridge$-$XGB [95\% CI] \\", r"\midrule"]
-    for s in sets:
-        gp = gaps.set_index("Set").loc[s]
-        lines.append(f"{s} & {piv.loc[s, 'Ridge']:.1f} & {piv.loc[s, 'Lasso']:.1f} & "
-                     f"{piv.loc[s, 'XGBoost']:.1f} & {gp['Ridge_minus_XGB_MW']:.1f} "
+    model_names = [m for m in ["Ridge", "Lasso", "XGBoost", "LSTM"] if m in piv.columns]
+    lines = [r"\begin{tabular}{l" + "r" * (len(model_names) + 1) + "}", r"\toprule",
+             "Inputs & " + " & ".join(model_names) + r" & Ridge$-$XGB [95\% CI] \\",
+             r"\midrule"]
+    for s_name in sets:
+        gp = gaps.set_index("Set").loc[s_name]
+        cells = [f"{piv.loc[s_name, m]:.1f}" if pd.notna(piv.loc[s_name, m]) else "--"
+                 for m in model_names]
+        lines.append(f"{s_name} & " + " & ".join(cells) +
+                     f" & {gp['Ridge_minus_XGB_MW']:.1f} "
                      f"[{gp['CI_low']:.0f}, {gp['CI_high']:.0f}] \\\\")
     lines += [r"\bottomrule", r"\end{tabular}"]
     with open(os.path.join(res_dir, "ablation_table.tex"), "w", encoding="utf-8") as f:
@@ -351,9 +437,9 @@ def main():
     # --- Figures
     # 1) Progressive inputs
     fig, ax = plt.subplots(figsize=(7, 4))
-    for m in ["Ridge", "Lasso", "XGBoost"]:
-        sub = res[res["Model"] == m].set_index("Set").loc[list(sets)]
-        ax.errorbar(range(len(sets)), sub["RMSE"],
+    for m in model_names:
+        sub = res[res["Model"] == m].set_index("Set").reindex(list(sets)).dropna(subset=["RMSE"])
+        ax.errorbar([list(sets).index(k) for k in sub.index], sub["RMSE"],
                     yerr=[sub["RMSE"] - sub["RMSE_CI_low"], sub["RMSE_CI_high"] - sub["RMSE"]],
                     marker="o", capsize=3, label=m)
     ax.axhline(pers_rmse, color="grey", ls="--", label="Persistence")
