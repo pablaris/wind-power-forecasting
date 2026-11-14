@@ -85,5 +85,6 @@ Column names, comments and some print output are a mix of Spanish and English. K
 Notebooks in `notebooks/` are meant to import their logic from `src/`. They read data with paths relative to
 `notebooks/`, so run Jupyter from inside that folder or adjust the paths.
 
-`src/eda/eda_esios.py` and the notebooks still read the old `data/processed/dataset.csv`. Point them to
-`dataset_forecast.csv` (or `dataset_reanalysis.csv`) before running them.
+`src/eda/eda_esios.py` and the notebook read `data/processed/dataset_forecast.csv` (full 2024-2026 period).
+`eda_esios.py` writes the 4 English-named EDA figures (`01_wind_power_curve.png` ... `04_temporal_cycles.png`)
+to `reports/figures/`. The Spanish-named PNGs there are from the old 2021-2023 period and no script generates them.
