@@ -55,12 +55,14 @@ ESIOS_TOKEN=your_token_here
 Run from the project root, in this order:
 
 ```bash
-python src/loaders/esios_client.py          # -> data/raw/esios/generacion_eolica.csv
-python src/loaders/open_meteo_client.py     # -> data/raw/open_meteo/meteorology.csv
-python src/processing/merge_datasets.py     # -> data/processed/dataset.csv
+python src/loaders/esios_client.py                            # -> data/raw/esios/generacion_eolica.csv
+python src/loaders/open_meteo_client.py --weather forecast    # -> data/raw/open_meteo/meteorology_forecast.csv
+python src/loaders/open_meteo_client.py --weather reanalysis  # -> data/raw/open_meteo/meteorology_reanalysis.csv
+python src/processing/merge_datasets.py --weather forecast    # -> data/processed/dataset_forecast.csv
+python src/processing/merge_datasets.py --weather reanalysis  # -> data/processed/dataset_reanalysis.csv
 ```
 
-The final dataset has one row per province and hour (~210k rows).
+Each final dataset has one row per province and hour (~187k rows).
 
 To regenerate the ESIOS figures:
 

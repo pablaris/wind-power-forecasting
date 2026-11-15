@@ -7,7 +7,7 @@ import seaborn as sns
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
 
-data_path = os.path.join(project_root, "data", "processed", "dataset.csv")
+data_path = os.path.join(project_root, "data", "processed", "dataset_forecast.csv")
 figures_dir = os.path.join(project_root, "reports", "figures")
 os.makedirs(figures_dir, exist_ok=True)
 
