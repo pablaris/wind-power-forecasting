@@ -74,14 +74,16 @@ save(fig, "fig1_progressive_inputs")
 # Accuracy vs computational cost (full inputs, forecast weather)
 full = fc[fc["Set"] == FULL]
 fig, ax = plt.subplots(figsize=(4.2, 3.0))
-label_pos = {"Ridge": (8, 4), "Lasso": (8, -11), "XGBoost": (-8, 6), "LSTM": (8, 4)}
 for _, r in full.iterrows():
+    dev = f" ({str(r['Device']).upper()})" if "Device" in full and r.get("Device") in ("cpu", "cuda") else ""
+    dev = dev.replace("CUDA", "GPU")
     ax.errorbar(r["Tune_s"], r["RMSE"],
                 yerr=[[r["RMSE"] - r["RMSE_CI_low"]], [r["RMSE_CI_high"] - r["RMSE"]]],
-                fmt="o", ms=6, capsize=3, color=COLORS[r["Model"]])
-    dx, dy = label_pos.get(r["Model"], (8, 4))
-    ax.annotate(r["Model"], (r["Tune_s"], r["RMSE"]), textcoords="offset points",
-                xytext=(dx, dy), fontsize=8, ha="left" if dx > 0 else "right")
+                fmt=MARKERS.get(r["Model"], "o"), ms=6, capsize=3, color=COLORS[r["Model"]],
+                label=f"{r['Model']}{dev}")
+# A legend instead of text labels: points that lie close together (e.g. XGBoost and
+# the LSTM on the GPU) would otherwise get each other's label.
+ax.legend(frameon=False, fontsize=8, loc="lower left")
 ax.set_xscale("log")
 ax.set_xlim(full["Tune_s"].min() / 2.5, full["Tune_s"].max() * 2.5)
 ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
